@@ -11,5 +11,6 @@
 
 | ADR | Título | Status |
 | --- | ------ | ------ |
+| APP-ADR-001 | Stack do satélite, linguagem visual e estrutura de pastas | accepted |
 
 

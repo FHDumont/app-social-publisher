@@ -1,0 +1,15 @@
+node_modules
+.next
+AGENTS.md
+CLAUDE.md
+README.md
+LICENSE
+out
+build
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+src/components/ui
+docs
+examples
+templates

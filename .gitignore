@@ -1,7 +1,35 @@
 # dependências
 node_modules/
+.pnp
+.pnp.*
+
+# este projeto usa npm (package-lock.json). O ambiente regenera artefatos pnpm
+# em background — ignorados para não conflitar com o lockfile do npm.
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
 # ambiente
 .env
 .env.local
+.env*.local
+
+# build / cache do Next
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
 # SO
 .DS_Store
+
+# runtime dos scripts (pid/log do lab)
+.run/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor
+.idea/
