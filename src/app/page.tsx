@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Inbox as InboxIcon, Radio, RefreshCw } from "lucide-react"
 
-import { isPublishing, type Post } from "@/domain/post"
+import type { Post } from "@/domain/post"
 import { usePublisher } from "@/store/publisher-store"
 import { PageHeader } from "@/components/shell/page-header"
 import { PostCard } from "@/components/posts/post-card"
@@ -11,22 +11,50 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 
-type Filter = "revisar" | "falhas" | "recusados"
+type Filter = "acao" | "recusados"
+
+/**
+ * Inbox = eixo de **ação** (APP-ADR-003): só o que exige decisão humana agora —
+ * posts `aRevisar` e `falhou`, numa única lista ordenada por urgência. A flag
+ * `rejected` é ortogonal: recusados saem da fila de ação mas seguem visíveis no
+ * filtro secundário "Recusados" (nada some em silêncio).
+ *
+ * Ordem de urgência: falhas primeiro (exigem reação), depois as pendências por
+ * proximidade temporal — as agendadas (`schedule.at`) pela proximidade do horário
+ * (mais cedo primeiro), e as imediatas (`now`) em seguida.
+ */
+function urgencyOrder(posts: Post[]): Post[] {
+  const active = posts.filter((p) => !p.rejected)
+  const failed = active
+    .filter((p) => p.state === "falhou")
+    .sort(
+      (a, b) =>
+        new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
+    )
+  const review = active.filter((p) => p.state === "aRevisar")
+  const reviewAt = review
+    .filter((p) => p.content.schedule.mode === "at")
+    .sort((a, b) => {
+      const at = a.content.schedule
+      const bt = b.content.schedule
+      // ambos são `at` aqui (filtro acima); o narrow é só para o TS.
+      const av = at.mode === "at" ? new Date(at.at).getTime() : 0
+      const bv = bt.mode === "at" ? new Date(bt.at).getTime() : 0
+      return av - bv
+    })
+  const reviewNow = review.filter((p) => p.content.schedule.mode === "now")
+  return [...failed, ...reviewAt, ...reviewNow]
+}
 
 export default function InboxPage() {
   const { posts, simulateReceive, refreshInbox } = usePublisher()
-  const [filter, setFilter] = useState<Filter>("revisar")
+  const [filter, setFilter] = useState<Filter>("acao")
 
-  const review = posts.filter(
-    (p) => p.state === "aRevisar" && !p.rejected && !isPublishing(p)
-  )
-  const publishingNow = posts.filter((p) => isPublishing(p) && !p.rejected)
-  const failed = posts.filter((p) => p.state === "falhou" && !p.rejected)
+  const action = urgencyOrder(posts)
   const rejected = posts.filter((p) => p.rejected)
 
   const lists: Record<Filter, Post[]> = {
-    revisar: [...publishingNow, ...review],
-    falhas: failed,
+    acao: action,
     recusados: rejected,
   }
   const current = lists[filter]
@@ -35,7 +63,7 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        description="Posts que o Mission Control empurrou, aguardando sua revisão."
+        description="O que exige sua decisão agora: falhas e posts a revisar, por urgência."
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={refreshInbox}>
@@ -52,13 +80,9 @@ export default function InboxPage() {
 
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
         <TabsList className="mb-5">
-          <TabsTrigger value="revisar">
-            A revisar
-            <Count n={review.length + publishingNow.length} />
-          </TabsTrigger>
-          <TabsTrigger value="falhas">
-            Falhas
-            <Count n={failed.length} tone="failed" />
+          <TabsTrigger value="acao">
+            Ação
+            <Count n={action.length} />
           </TabsTrigger>
           <TabsTrigger value="recusados">
             Recusados
@@ -87,18 +111,16 @@ function Count({
   tone = "default",
 }: {
   n: number
-  tone?: "default" | "failed" | "muted"
+  tone?: "default" | "muted"
 }) {
   if (n === 0) return null
   return (
     <span
       className={cn(
         "ml-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[11px] font-semibold",
-        tone === "failed"
-          ? "bg-status-failed text-status-failed-foreground"
-          : tone === "muted"
-            ? "bg-muted text-muted-foreground"
-            : "bg-primary/15 text-primary"
+        tone === "muted"
+          ? "bg-muted text-muted-foreground"
+          : "bg-primary/15 text-primary"
       )}
     >
       {n}
@@ -114,13 +136,9 @@ function EmptyState({
   onReceive: () => void
 }) {
   const copy: Record<Filter, { title: string; body: string }> = {
-    revisar: {
+    acao: {
       title: "Inbox limpa",
-      body: "Nenhum post aguardando revisão. Simule um recebimento do MC para ver a jornada.",
-    },
-    falhas: {
-      title: "Nenhuma falha",
-      body: "Todas as publicações resolveram com sucesso até agora.",
+      body: "Nada exige sua decisão agora — sem falhas nem posts a revisar. Simule um recebimento do MC para ver a jornada.",
     },
     recusados: {
       title: "Nada recusado",
@@ -140,7 +158,7 @@ function EmptyState({
           {body}
         </p>
       </div>
-      {filter === "revisar" && (
+      {filter === "acao" && (
         <Button
           variant="outline"
           size="sm"

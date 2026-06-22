@@ -6,7 +6,7 @@
 
 ## Atual
 
-- (nenhuma — F-int-mc entregue; aguardando aprovação do dono para seguir para F-002)
+- (nenhuma — F-002 entregue; aguardando aprovação do dono para escolher a próxima fase)
 
 ## Próximas
 

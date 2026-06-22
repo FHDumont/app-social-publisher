@@ -87,3 +87,34 @@ O MC chama `POST <callback>` com `Authorization: Bearer <token-por-app>` (`mcat_
 - **Verificação no browser** exigiu um servidor com o token; usei uma config `lab` temporária no `launch.json` (revertida depois) — o `GET /mc/inbox` não exige token, mas o `POST` sim. `.env`/segredos não foram tocados (responsabilidade do dono).
 - **Formato do invólucro confirmado no teste real (D-002 fechado).** O MC envia `{ jobId, status, output: [ { type:"text", content:"<JSON v1 como string>" } ] }` — o `content` v1 chega como **string JSON** dentro de um item `output` com `type:"text"` (minhas hipóteses iniciais eram `type:"post"` e `content` como objeto). Ajustei o `mc-wrapper.ts`: varre `output` ignorando só `type:"file"`, e faz `JSON.parse` quando o `content` é string. Confirmado pela cadeia real (`https://social.lab/...` → `202`, `source=body.output[].content`). Foi exatamente o cenário "defensivo até o teste revelar" previsto na spec.
 - **Exposição (infra do dono).** O roteamento `social.lab` vivia no Traefik do home-lab (`infra/traefik/config/dynamic/middlewares.yml`): os routers de `social.lab` apontavam pro service `mc` (3000) por copy-paste; o dono corrigiu para o service `social-publisher` (`host.docker.internal:3010`). Não toquei nessa config (território do dono) — só diagnostiquei.
+
+---
+
+# F-002 — UX de visões: Inbox (ação) × Calendário (tempo)
+
+## Objetivo
+
+Codificar a separação de papéis entre as duas visões que mostram os mesmos posts: **Inbox = eixo de ação** (o que exige decisão humana agora), **Calendário = eixo de tempo** (o que sai quando e onde). Implementar os tratamentos visuais que faltavam para cada estado aparecer no lugar certo, e registrar a decisão num ADR. Resolveu `D-004`. Sem mudar a máquina de estados nem o modelo de post — só reflete melhor, no visual, estados que já existem.
+
+## Escopo
+
+**Entrou:** APP-ADR-003 (Inbox=ação, Calendário=tempo; sem kanban); Inbox filtrada para `aRevisar`+`falhou` em lista única ordenada por urgência (falhas primeiro; depois `aRevisar` com `at` por proximidade do horário, e `now` em seguida), com `Recusados` mantido como filtro secundário; Calendário com tratamentos visuais por estado (firme p/ `agendado`, registro p/ `publicado`, marca vermelha p/ `falhou`, bloco fantasma-tracejado p/ `aRevisar`+`at`) e omissão de `aRevisar`+`now`; transição fantasma→firme reativa pela máquina de estados (aprovar pela página do post); migração de `D-004` para `DEBITO-RESOLVIDO`.
+
+**NÃO entrou:** kanban (registrado como ideia futura no ADR); ação de aprovar inline no calendário (decisão do dono: reativo via página do post); mudança na máquina de estados/modelo `content`/recepção do MC; correção de D-007; persistência (D-005/D-006).
+
+## Critério de pronto — verificado
+
+- Inbox mostra só `aRevisar`+`falhou` na lista de ação, ordenados por urgência (verificado no browser: card `falhou` → `aRevisar`+`at` (24/06) → `aRevisar`+`now`); `Recusados` segue acessível (tab "Recusados 1").
+- Calendário: blocos firmes p/ `agendado` (SEG 22, TER 23), fantasma-tracejado p/ `aRevisar`+`at` (QUA 24, c2), marca de falha p/ `falhou` (c5 presente); `aRevisar`+`now` (c1) e recusado (c8) **ausentes** do calendário (verificado via DOM).
+- Transição fantasma→firme: aprovar c2 pela página do post (nav client-side) → bloco passa de `dashed`/"A revisar"/"aguarda aprovação" para sólido/`shadow`/"Agendado" (verificado via DOM).
+- APP-ADR-003 escrito e indexado; D-004 migrado com nota; docs vivos atualizados.
+- `tsc`, `eslint`, `prettier` limpos. **`next build` falha** num passo pré-existente (`/_not-found`) — ver Notas.
+
+## Notas de implementação
+
+- **`Recusados` não estava na tabela cravada.** A regra de distribuição da spec fala dos *estados* (`aRevisar`/`falhou`/`agendado`/`publicado`); a flag `rejected` é ortogonal e a spec era silenciosa sobre ela. Tirar recusados da Inbox os faria sumir de tudo (já não aparecem no calendário), violando o invariante "nada some em silêncio" (CONVENCOES). Decisão: Inbox = lista de ação (`aRevisar`+`falhou` por urgência) **+** filtro secundário `Recusados`. Registrado no ADR.
+- **Aprovar no calendário = reativo, não inline.** A spec dizia "aprovar um `aRevisar`+`at` pelo calendário converte fantasma→firme". Confirmei com o dono o mecanismo: **sem** UI de aprovar no calendário (KISS/YAGNI) — a aprovação mora na página do post; como o store é reativo e o tratamento é puramente derivado do estado (`isGhost = state === "aRevisar"`), o `decideOnApprove` levando a `agendado` faz o calendário re-renderizar firme sozinho. Nenhuma lógica de sincronização nova.
+- **Ordenação por urgência** é só apresentação (helper `urgencyOrder` em `src/app/page.tsx`, não no domínio): concatenação `falhas (receivedAt desc) + aRevisar-at (at asc) + aRevisar-now`, em vez de comparator único — mais legível e KISS.
+- **Omissão de `aRevisar`+`now`** feita no `postsByDay` do calendário (um `continue` no laço): `now` não tem horário próprio, então não pertence ao eixo de tempo. `falhou`/`publicado` com `now` continuam (posicionados em `createdAt`, o horário em que era pra sair).
+- **Tratamento fantasma** = `border-dashed` + bg translúcido + sem sombra (vs. o bloco firme com `shadow-sm`), nas três variantes (mês/semana/dia), mais um rótulo "aguarda aprovação" e uma entrada na legenda. Reusa os tokens `--status-*` existentes; nenhum token novo.
+- **`next build` quebrado é pré-existente (D-008).** Reproduz no tree limpo (commit F-int-mc) após `rm -rf .next`: `PageNotFoundError` ao coletar `/_not-found`. `tsc`/`eslint`/compilação passam e `next dev` roda — a verificação desta fase foi feita no browser via dev server. Drift de Turbopack/Next 15.5.x; registrado como débito, fora do escopo desta fase (sem refatoração de carona).

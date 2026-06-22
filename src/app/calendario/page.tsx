@@ -67,6 +67,11 @@ export default function CalendarPage() {
     const map = new Map<string, Post[]>()
     for (const post of posts) {
       if (post.rejected) continue
+      // Calendário = eixo de tempo (APP-ADR-003): `aRevisar`+`now` não tem horário
+      // próprio (sairia "agora", se aprovado) — vive só na Inbox até virar
+      // agendado/publicado. Os demais `aRevisar` (com `at`) entram como fantasma.
+      if (post.state === "aRevisar" && post.content.schedule.mode === "now")
+        continue
       const key = dayKey(postTimestamp(post))
       const list = map.get(key) ?? []
       list.push(post)
@@ -95,7 +100,7 @@ export default function CalendarPage() {
     <>
       <PageHeader
         title="Calendário"
-        description="Posts agendados e publicados, por dia e horário. Clique em um post para abrir."
+        description="O que sai quando e onde: agendados, publicados, falhas e pendências com horário. Clique em um post para abrir."
       />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -172,6 +177,10 @@ function Legend() {
           {STATE_LABEL[s]}
         </span>
       ))}
+      <span className="inline-flex items-center gap-1.5">
+        <span className="border-status-review-foreground size-2.5 rounded-[3px] border border-dashed" />
+        Tracejado = aguarda aprovação
+      </span>
     </div>
   )
 }
@@ -340,14 +349,20 @@ function CalendarBlock({
   const time = formatTime(postTimestamp(post))
   const postChannels = resolveChannels(post.content.channels, channels)
   const href = `/post/${post.content.deliveryId}`
+  // Fantasma: `aRevisar` (sempre `at` aqui — `now` foi filtrado) ainda depende de
+  // aprovação; bloco tracejado/translúcido vs. o bloco firme dos confirmados.
+  const isGhost = post.state === "aRevisar"
 
   if (variant === "month") {
     return (
       <Link
         href={href}
         className={cn(
-          "bg-muted/50 hover:bg-muted block rounded-md border-l-2 px-1.5 py-1 transition-colors",
-          STATE_ACCENT[post.state]
+          "block rounded-md border-l-2 px-1.5 py-1 transition-colors",
+          STATE_ACCENT[post.state],
+          isGhost
+            ? "hover:bg-muted/40 border border-dashed bg-transparent"
+            : "bg-muted/50 hover:bg-muted"
         )}
       >
         <div className="flex items-center gap-1.5">
@@ -373,8 +388,11 @@ function CalendarBlock({
     <Link
       href={href}
       className={cn(
-        "group bg-card hover:bg-muted/40 block rounded-lg border border-l-[3px] px-2.5 py-2.5 shadow-sm transition-all hover:-translate-y-px hover:shadow-md",
-        STATE_ACCENT[post.state]
+        "group block rounded-lg border border-l-[3px] px-2.5 py-2.5 transition-all hover:-translate-y-px",
+        STATE_ACCENT[post.state],
+        isGhost
+          ? "bg-card/50 hover:bg-muted/30 border-dashed"
+          : "bg-card hover:bg-muted/40 shadow-sm hover:shadow-md"
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -409,6 +427,11 @@ function CalendarBlock({
         {post.content.autoPublish && (
           <span className="bg-accent text-accent-foreground inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium">
             auto
+          </span>
+        )}
+        {isGhost && (
+          <span className="text-muted-foreground text-[10px] font-medium">
+            aguarda aprovação
           </span>
         )}
       </div>

@@ -13,5 +13,6 @@
 | --- | ------ | ------ |
 | APP-ADR-001 | Stack do satélite, linguagem visual e estrutura de pastas | accepted |
 | APP-ADR-002 | Recepção real do MC: inbox em memória no servidor + ponte por polling | accepted |
+| APP-ADR-003 | UX de visões: Inbox=ação, Calendário=tempo; sem kanban | accepted |
 
 
