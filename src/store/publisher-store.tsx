@@ -33,6 +33,10 @@ import {
 } from "@/data/fixtures"
 import { MockPublisher } from "@/io/publisher"
 import { MockReceiver } from "@/io/receiver"
+import { inboxResponseSchema, type WirePost } from "@/io/mc-inbox-wire"
+
+/** Intervalo do polling da ponte server→client da recepção real (APP-ADR-002). */
+const MC_POLL_MS = 4000
 
 /* ------------------------------------------------------------------ */
 /* Estado + reducer                                                     */
@@ -51,6 +55,8 @@ type Action =
   | { type: "SET_REJECTED"; id: string; rejected: boolean }
   | { type: "UPDATE_CONTENT"; id: string; content: PostContent }
   | { type: "SET_CHANNEL_CONNECTED"; slug: string; connected: boolean }
+  // Mescla posts vindos do inbox real do servidor (recepção do MC).
+  | { type: "MERGE_REMOTE"; posts: Post[] }
 
 function mapPost(posts: Post[], id: string, fn: (post: Post) => Post): Post[] {
   return posts.map((p) => (p.content.deliveryId === id ? fn(p) : p))
@@ -120,6 +126,15 @@ function reducer(state: State, action: Action): State {
         ),
       }
 
+    case "MERGE_REMOTE": {
+      // Idempotente por `deliveryId`: só adiciona o que ainda não existe (o post
+      // já presente pode ter sido editado/aprovado localmente — não sobrescreve).
+      const known = new Set(state.posts.map((p) => p.content.deliveryId))
+      const fresh = action.posts.filter((p) => !known.has(p.content.deliveryId))
+      if (fresh.length === 0) return state
+      return { ...state, posts: [...fresh, ...state.posts] }
+    }
+
     default:
       return state
   }
@@ -136,6 +151,8 @@ export interface PublisherStore {
   nowISO: string
   /** Simula a chegada de um push do MC (injeta um post `origin:"mc"`). */
   simulateReceive: () => void
+  /** Busca o inbox real do servidor (recepção do MC) e mescla — botão "Atualizar". */
+  refreshInbox: () => void
   /** Aprova um post em revisão → agenda ou publica conforme o schedule. */
   approve: (id: string) => void
   /** Recusa um post (some da fila ativa, fica no filtro Recusados). */
@@ -274,6 +291,58 @@ export function PublisherProvider({
     receiver.simulate()
   }, [receiver])
 
+  // Ids de erro já notificados, para não repetir toast a cada poll.
+  const seenErrorIds = useRef<Set<string>>(new Set())
+
+  /**
+   * Ponte server→client: busca o inbox real do servidor (posts recebidos do MC) e
+   * mescla na inbox local. Novos posts/erros viram toast. Erro de rede é só logado
+   * (o dev server pode estar reiniciando) — nunca quebra a UI.
+   */
+  const refreshInbox = useCallback(async () => {
+    let json: unknown
+    try {
+      const res = await fetch("/mc/inbox", { cache: "no-store" })
+      if (!res.ok) return
+      json = await res.json()
+    } catch {
+      return
+    }
+
+    const parsed = inboxResponseSchema.safeParse(json)
+    if (!parsed.success) {
+      console.warn(
+        "[inbox] resposta de /mc/inbox inválida:",
+        parsed.error.message
+      )
+      return
+    }
+
+    const known = new Set(
+      stateRef.current.posts.map((p) => p.content.deliveryId)
+    )
+    const incoming: Post[] = parsed.data.posts.map((p: WirePost) => ({ ...p }))
+    const fresh = incoming.filter((p) => !known.has(p.content.deliveryId))
+
+    if (fresh.length > 0) {
+      dispatch({ type: "MERGE_REMOTE", posts: incoming })
+      fresh.forEach((p) => notifyRef.current?.received?.(p.content))
+    }
+
+    parsed.data.errors.forEach((e) => {
+      if (seenErrorIds.current.has(e.id)) return
+      seenErrorIds.current.add(e.id)
+      notifyRef.current?.invalid?.(e.reason)
+    })
+  }, [])
+
+  // Polling leve do inbox real (APP-ADR-002): uma busca imediata + a cada ~4s.
+  useEffect(() => {
+    void refreshInbox()
+    const id = setInterval(() => void refreshInbox(), MC_POLL_MS)
+    return () => clearInterval(id)
+  }, [refreshInbox])
+
   const approve = useCallback(
     (id: string) => {
       const post = getPost(id)
@@ -341,6 +410,7 @@ export function PublisherProvider({
       channels: state.channels,
       nowISO: APP_NOW_ISO,
       simulateReceive,
+      refreshInbox,
       approve,
       reject,
       restore,
@@ -354,6 +424,7 @@ export function PublisherProvider({
       state.posts,
       state.channels,
       simulateReceive,
+      refreshInbox,
       approve,
       reject,
       restore,

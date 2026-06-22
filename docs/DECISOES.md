@@ -12,5 +12,6 @@
 | ADR | Título | Status |
 | --- | ------ | ------ |
 | APP-ADR-001 | Stack do satélite, linguagem visual e estrutura de pastas | accepted |
+| APP-ADR-002 | Recepção real do MC: inbox em memória no servidor + ponte por polling | accepted |
 
 

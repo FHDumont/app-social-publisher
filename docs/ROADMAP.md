@@ -6,11 +6,10 @@
 
 ## Atual
 
-- (nenhuma — aguardando aprovação de F-001 para definir a próxima)
+- (nenhuma — F-int-mc entregue; aguardando aprovação do dono para seguir para F-002)
 
 ## Próximas
 
-- **F-int-mc** — integração real com o MC: receptor do push, parser do invólucro, token, callback (depende de confirmar os 3 pontos da §6.B do manual de integração no chat do MC — ver D-002).
 - **F-config-admin** — área de Configurações/Admin de verdade (token + callback do MC, OAuth/conexão de contas, políticas de publicação/notificação); hoje só placeholder visual em `/config` (ver D-003).
 - **F-mídia** — download e persistência local da mídia vinda do MC ao receber (regra do 410/expiração em ~3 dias).
 - **F-oauth-redes** — OAuth e publicação real em cada rede (LinkedIn, X, Instagram, YouTube, WordPress/Newsletter).

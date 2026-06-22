@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Inbox as InboxIcon, Radio } from "lucide-react"
+import { Inbox as InboxIcon, Radio, RefreshCw } from "lucide-react"
 
 import { isPublishing, type Post } from "@/domain/post"
 import { usePublisher } from "@/store/publisher-store"
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 type Filter = "revisar" | "falhas" | "recusados"
 
 export default function InboxPage() {
-  const { posts, simulateReceive } = usePublisher()
+  const { posts, simulateReceive, refreshInbox } = usePublisher()
   const [filter, setFilter] = useState<Filter>("revisar")
 
   const review = posts.filter(
@@ -37,10 +37,16 @@ export default function InboxPage() {
         title="Inbox"
         description="Posts que o Mission Control empurrou, aguardando sua revisão."
         actions={
-          <Button variant="outline" size="sm" onClick={simulateReceive}>
-            <Radio />
-            Simular recebimento do MC
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={refreshInbox}>
+              <RefreshCw />
+              Atualizar
+            </Button>
+            <Button variant="outline" size="sm" onClick={simulateReceive}>
+              <Radio />
+              Simular recebimento do MC
+            </Button>
+          </div>
         }
       />
 

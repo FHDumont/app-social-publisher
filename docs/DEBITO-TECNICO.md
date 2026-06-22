@@ -7,6 +7,8 @@
 > Veja `examples/docs/DEBITO-TECNICO.md` pra um exemplo preenchido.
 
 - D-001 — sem testes automatizados; máquina de estados (`src/domain/state-machine.ts`) e validação por-rede (`src/domain/networks.ts`) são domínio puro e merecem cobertura unit — 🔵
-- D-002 — [pedido p/ o chat] contrato de recepção do MC em aberto (§6.B: formato do corpo, id consultável, headers do invólucro); confirmar no chat do MC antes de implementar F-int-mc — 🟡
-- D-003 — [pedido p/ o chat] definir a spec da área de Configurações/Admin (token + URL de callback do MC, OAuth das redes); hoje é só placeholder visual em `/config`; depende de D-002 — 🟡
+- D-003 — [pedido p/ o chat] definir a spec da área de Configurações/Admin (token + URL de callback do MC, OAuth das redes); hoje é só placeholder visual em `/config` — 🟡
 - D-004 — [pedido p/ o chat] definir UX de Inbox × Calendário (mesmos dados, visões diferentes) e se entra um modo kanban; hoje Inbox = fila de ação, Calendário = visão temporal — 🔵
+- D-005 — inbox real **em memória no servidor** (`src/io/mc-inbox.server.ts`); posts recebidos do MC **somem no restart** do processo, até F-persistência — 🔵 (limitação aceita; ver APP-ADR-002)
+- D-006 — [pedido p/ o chat] **persistência/BD ainda indefinida**: como salvar posts recebidos, estados e resultados (Postgres/Drizzle? outro?); enquanto não definido, server e cliente seguem em memória — 🟡
+- D-007 — recepção real não orquestra publicação no servidor (o `MockPublisher` é client-side); um push `autoPublish:true` cai em `aRevisar` em vez de publicar ao receber; revisar em F-oauth-redes/F-persistência — 🔵

@@ -44,3 +44,46 @@ O publisher é **receptor puro (Modo B)** do MC: nunca submete job, nunca faz po
 - **Timezone fixo (America/Sao_Paulo).** Tudo que renderiza tempo no servidor e no cliente usa TZ fixo e um relógio de app fixo (`APP_NOW_ISO`) para evitar hydration mismatch; o calendário/scheduling convertem `datetime-local` com offset `-03:00` (Brasil sem DST desde 2019).
 - **"Recusar".** O enum de estado tem 4 valores; recusa não é um estado da máquina — é uma flag `rejected` que tira o post da fila ativa mas o mantém visível no filtro "Recusados" (reversível por "Restaurar"). Nada some em silêncio.
 - **Estado em memória.** Recarregar zera tudo — esperado nesta fase de dados falsos.
+
+---
+
+# F-int-mc — Receptor do push do MC (mc→app) no ar
+
+## Objetivo
+
+Expor o endpoint real que recebe o push agendado do MC (Modo B / receptor puro), valida o token, parseia o `content` v1 e injeta o post na inbox como `origin:"mc"`. Meta imediata: **estar no ar para o teste de ponta a ponta** (um agent de exemplo no MC empurra posts de texto). Sem mídia, sem publicação real, sem persistência real. O `MockReceiver` de F-001 **permanece** (dev offline), ao lado do receptor real.
+
+## Contexto / contrato
+
+O MC chama `POST <callback>` com `Authorization: Bearer <token-por-app>` (`mcat_…`; aqui só mc→app). O corpo é um invólucro do MC que **contém** o campo aberto `content` (v1). O **formato exato do invólucro** (§6.B 1–3) **não estava cravado** — receptor **defensivo**: loga o corpo cru e valida o `content` onde quer que ele esteja, falhando **visível** se não reconhecer. O teste com o agent de exemplo confirma o formato.
+
+### `content` v1 (reusado de `src/domain/content.ts`)
+
+`schemaVersion` (1), `deliveryId` (uuid, dedup), `origin` (`"mc"`), `createdAt` (ISO-8601), `channels`, `base` (`{text, media:[refs]}`), `perChannel`, `media` (vazio no teste), `schedule` (`now`|`at`), `autoPublish` (false ⇒ revisão humana).
+
+## Escopo
+
+**Entrou:** `POST /mc/callback` (Bearer via `MC_APP_TOKEN`; `401` ausente/errado, `503` sem env; `202` rápido + processamento assíncrono; log do corpo cru); parser defensivo do `content` v1 (`src/io/mc-wrapper.ts`, localiza em `body.content` / `body.output[].post` / corpo); dedup por `deliveryId`; injeção via `decideOnReceive` (máquina de estados de F-001 **não** alterada); tolerância a `file` parts (ignoradas+registradas); inbox em memória no servidor (`src/io/mc-inbox.server.ts`); ponte server→client por `GET /mc/inbox` + polling ~4s + botão "Atualizar" (APP-ADR-002); `MC_APP_TOKEN` por env (`.env.example`); docs de exposição para o dono no README.
+
+**NÃO entrou:** download/persistência de mídia (F-mídia); publicação real (F-oauth-redes); polling/Modo A/submissão de jobs; fixar o formato definitivo do invólucro (defensivo até o teste — D-002); persistência real / definição de BD (D-005, D-006).
+
+## Critério de pronto — verificado
+
+- `POST /mc/callback` no ar; `401` sem/with token errado, `503` sem env, `202` rápido (smoke via curl).
+- Corpo cru logado; `content` v1 validado; conteúdo não reconhecido vira **erro visível** consultável em `GET /mc/inbox` (verificado: payload com `channels:[]` → erro com motivo Zod).
+- `deliveryId` deduplica (mesmo push 2x → 1 post).
+- Post recebido aparece na inbox como `origin:"mc"` / `aRevisar`, ao lado dos mockados (verificado no browser: card "Olá do MC real (teste e2e)" + botão "Atualizar"; sem erros de console).
+- Token de env (não hardcoded); `.env.local`/exposição documentados no README.
+- `tsc`, `eslint`, `prettier`, `next build` limpos.
+
+## Notas de implementação
+
+- **A restrição central era arquitetural, não a do invólucro.** A inbox de F-001 é client-side; o callback é server-side. Resolvido com inbox em memória no servidor (singleton em `globalThis`, sobrevive ao HMR) + ponte por polling — decidido com o dono e registrado em **APP-ADR-002** (o dono pediu polling **e** botão "Atualizar").
+- **Parser defensivo por geração de candidatos** (`mc-wrapper.ts`): tenta `body.content`, itens `body.output` com `type:"post"` (no `.content` do item ou o próprio item), e o corpo inteiro; o 1º que casa no `postContentSchema` vence. Guarda o erro Zod do candidato com `schemaVersion` para a mensagem final — erro útil, nunca silencioso.
+- **`202` + `queueMicrotask`** para honrar "responde rápido, processa assíncrono"; a validação do token é síncrona (gate de `401`) antes de aceitar. Em processo Node persistente (lab) o microtask completa; em serverless, trabalho pós-resposta pode ser cortado — reavaliar se o deploy mudar.
+- **Contrato de fio único** (`mc-inbox-wire.ts`, Zod) compartilhado por `GET /mc/inbox` e pelo cliente — I/O validado nos dois lados, como manda CONVENCOES. `WirePost` é estruturalmente um `Post`.
+- **Merge idempotente por `deliveryId`** no reducer (`MERGE_REMOTE`): só adiciona o que ainda não existe, para o polling não duplicar nem sobrescrever posts já aprovados/editados localmente.
+- **`file` parts** só são contadas/logadas (mídia é F-mídia). **Auto-publish na recepção real** não é orquestrado no servidor (publisher é client-side) → posts `autoPublish` caem em `aRevisar` (D-007); fora do escopo do teste (`autoPublish:false`).
+- **Verificação no browser** exigiu um servidor com o token; usei uma config `lab` temporária no `launch.json` (revertida depois) — o `GET /mc/inbox` não exige token, mas o `POST` sim. `.env`/segredos não foram tocados (responsabilidade do dono).
+- **Formato do invólucro confirmado no teste real (D-002 fechado).** O MC envia `{ jobId, status, output: [ { type:"text", content:"<JSON v1 como string>" } ] }` — o `content` v1 chega como **string JSON** dentro de um item `output` com `type:"text"` (minhas hipóteses iniciais eram `type:"post"` e `content` como objeto). Ajustei o `mc-wrapper.ts`: varre `output` ignorando só `type:"file"`, e faz `JSON.parse` quando o `content` é string. Confirmado pela cadeia real (`https://social.lab/...` → `202`, `source=body.output[].content`). Foi exatamente o cenário "defensivo até o teste revelar" previsto na spec.
+- **Exposição (infra do dono).** O roteamento `social.lab` vivia no Traefik do home-lab (`infra/traefik/config/dynamic/middlewares.yml`): os routers de `social.lab` apontavam pro service `mc` (3000) por copy-paste; o dono corrigiu para o service `social-publisher` (`host.docker.internal:3010`). Não toquei nessa config (território do dono) — só diagnostiquei.
